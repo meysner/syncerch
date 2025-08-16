@@ -349,14 +349,27 @@ func safeUnzip(src, dest string) error {
 	}
 	return nil
 }
-
 func safeCleanDir(path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err
 	}
 	if abs == "/" || abs == "." {
-		return fmt.Errorf("refusing to remove unsafe path: %s", abs)
+		return fmt.Errorf("refusing to clean unsafe path: %s", abs)
 	}
-	return os.RemoveAll(abs)
+	// гарантируем, что каталог есть
+	if err := os.MkdirAll(abs, 0755); err != nil {
+		return err
+	}
+	// удаляем только содержимое
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(abs, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
