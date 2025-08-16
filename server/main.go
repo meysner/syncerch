@@ -56,7 +56,7 @@ func main() {
 		os.Remove(tmpPath)
 	})
 
-	r.Run(":8080")
+	r.Run(":1244")
 }
 
 func authMiddleware() gin.HandlerFunc {

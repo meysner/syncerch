@@ -1,0 +1,42 @@
+# Стадия сборки
+FROM golang:1.21 AS builder
+
+WORKDIR /app
+
+# Копируем go.mod и go.sum и загружаем зависимости
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Копируем исходный код
+COPY . .
+
+# Собираем Go-приложение
+RUN go build -o server .
+
+# Минимальный образ
+FROM debian:bookworm-slim
+
+# Установка временной зоны (по желанию)
+ENV TZ=UTC
+
+# Добавим непривилегированного пользователя
+RUN useradd -m appuser
+
+# Создаем директории
+RUN mkdir -p /app/storage/files
+
+# Копируем бинарник и другие нужные файлы
+COPY --from=builder /app/server /usr/local/bin/server
+COPY --from=builder /app/tokens.txt /app/tokens.txt
+
+# Устанавливаем рабочую директорию
+WORKDIR /app
+
+# Меняем пользователя
+USER appuser
+
+# Порт, который использует Gin
+EXPOSE 1244
+
+# Запуск приложения
+ENTRYPOINT ["server"]
