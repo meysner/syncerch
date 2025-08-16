@@ -161,7 +161,7 @@ func safeUnzip(src, dest string) error {
 
 		// защита от zip slip
 		if !strings.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
-			return &zip.PathError{Op: "unzip", Path: fpath, Err: os.ErrInvalid}
+			return err
 		}
 
 		if f.FileInfo().IsDir() {
