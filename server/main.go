@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -156,21 +157,29 @@ func safeUnzip(src, dest string) error {
 	}
 	defer r.Close()
 
+	cleanDest := filepath.Clean(dest) + string(os.PathSeparator)
+
 	for _, f := range r.File {
+		// Полный путь для распаковки
 		fpath := filepath.Join(dest, f.Name)
 
-		// защита от zip slip
-		if !strings.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
-			return err
+		// Защита от zip slip
+		cleanPath := filepath.Clean(fpath) + string(os.PathSeparator)
+		if !strings.HasPrefix(cleanPath, cleanDest) {
+			return fmt.Errorf("zip slip detected: entry %q escapes %q", f.Name, dest)
 		}
 
 		if f.FileInfo().IsDir() {
-			os.MkdirAll(fpath, f.Mode())
+			if err := os.MkdirAll(fpath, f.Mode()); err != nil {
+				return err
+			}
 			continue
 		}
-		if err = os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+
+		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
 			return err
 		}
+
 		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 		if err != nil {
 			return err
@@ -180,9 +189,10 @@ func safeUnzip(src, dest string) error {
 			outFile.Close()
 			return err
 		}
+
 		_, err = io.Copy(outFile, rc)
-		outFile.Close()
 		rc.Close()
+		outFile.Close()
 		if err != nil {
 			return err
 		}
