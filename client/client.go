@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -13,18 +14,32 @@ import (
 	"strings"
 )
 
-const serverURL = "http://syncerch.meysner.ru" // поменяй на свой адрес сервера
+const serverURL = "http://syncerch.meysner.ru"
+const configFile = "config.json"
+
+type Config struct {
+	Token      string `json:"token"`
+	FolderPath string `json:"folder_path"`
+}
 
 func main() {
+	config := loadConfig()
+
 	reader := bufio.NewReader(os.Stdin)
 
-	fmt.Print("Введите токен: ")
-	token, _ := reader.ReadString('\n')
-	token = strings.TrimSpace(token)
+	if config.Token == "" {
+		fmt.Print("Введите токен: ")
+		token, _ := reader.ReadString('\n')
+		config.Token = strings.TrimSpace(token)
+	}
 
-	fmt.Print("Введите путь к папке: ")
-	folderPath, _ := reader.ReadString('\n')
-	folderPath = strings.TrimSpace(folderPath)
+	if config.FolderPath == "" {
+		fmt.Print("Введите путь к папке: ")
+		folderPath, _ := reader.ReadString('\n')
+		config.FolderPath = strings.TrimSpace(folderPath)
+	}
+
+	saveConfig(config)
 
 	for {
 		fmt.Println("\nВыберите действие:")
@@ -37,13 +52,13 @@ func main() {
 
 		switch choice {
 		case "1":
-			if err := uploadFolder(token, folderPath); err != nil {
+			if err := uploadFolder(config.Token, config.FolderPath); err != nil {
 				fmt.Println("Ошибка загрузки:", err)
 			} else {
 				fmt.Println("Папка успешно загружена")
 			}
 		case "2":
-			if err := downloadFolder(token, folderPath); err != nil {
+			if err := downloadFolder(config.Token, config.FolderPath); err != nil {
 				fmt.Println("Ошибка скачивания:", err)
 			} else {
 				fmt.Println("Папка успешно скачана")
@@ -52,6 +67,27 @@ func main() {
 			fmt.Println("Неизвестная команда")
 		}
 	}
+}
+
+func loadConfig() Config {
+	var cfg Config
+	file, err := os.Open(configFile)
+	if err != nil {
+		return cfg // если файла нет — возвращаем пустую конфигурацию
+	}
+	defer file.Close()
+	json.NewDecoder(file).Decode(&cfg)
+	return cfg
+}
+
+func saveConfig(cfg Config) {
+	file, err := os.Create(configFile)
+	if err != nil {
+		fmt.Println("Не удалось сохранить конфигурацию:", err)
+		return
+	}
+	defer file.Close()
+	json.NewEncoder(file).Encode(cfg)
 }
 
 func uploadFolder(token, folderPath string) error {
