@@ -1,45 +1,31 @@
-# ---------- СТАДИЯ 1: Сборка ----------
-FROM golang:1.24.6 AS builder
-
-# Устанавливаем рабочую директорию
-WORKDIR /app
-
-# Копируем go.mod и go.sum и загружаем зависимости
+# syntax=docker/dockerfile:1.7
+FROM golang:1.22-alpine AS build
+WORKDIR /src
+RUN apk add --no-cache git ca-certificates
 COPY go.mod go.sum ./
-RUN go mod download
-
-# Копируем исходники проекта
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath -ldflags="-s -w" -o /out/server .
 
-# Собираем бинарник
-RUN go build -o server .
+FROM alpine:3.20
+RUN addgroup -S app && adduser -S -G app -u 10001 app \
+  && mkdir -p /data /run/secrets \
+  && chown -R app:app /data /run/secrets
+WORKDIR /
+COPY --from=build /out/server /server
 
+ENV STORAGE_PATH=/data \
+    TOKENS_PATH=/run/secrets/tokens.txt \
+    PORT=1244 \
+    GIN_MODE=release \
+    MAX_MULTIPART_MB=8
 
-
-# ---------- СТАДИЯ 2: Минимальный образ ----------
-FROM debian:bookworm-slim
-
-# Устанавливаем временную зону и утилиты (опционально)
-ENV TZ=UTC
-
-# Создаём непривилегированного пользователя
-RUN useradd -m appuser
-
-# Создаём директории для приложения
-RUN mkdir -p /app/storage/files
-RUN chown -R appuser:appuser /app
-
-# Копируем бинарник из стадии сборки
-COPY --from=builder /app/server /usr/local/bin/server
-
-# Назначаем рабочую директорию
-WORKDIR /app
-
-# Переключаемся на непривилегированного пользователя
-USER appuser
-
-# Указываем порт, который слушает Gin
 EXPOSE 1244
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:1244/healthz || exit 1
 
-# Запускаем приложение
-ENTRYPOINT ["server"]
+VOLUME ["/data", "/run/secrets"]
+USER app
+ENTRYPOINT ["/server"]
