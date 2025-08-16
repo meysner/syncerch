@@ -1,7 +1,6 @@
 start with this shit
 docker run -d \
   -p 1244:1244 \
-  -v $PWD/tokens.txt:/app/tokens.txt:ro \
   -v $PWD/storage:/app/storage \
   --name syncerch \
   syncerch

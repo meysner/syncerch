@@ -14,7 +14,8 @@ import (
 	"strings"
 )
 
-const serverURL = "http://syncerch.meysner.ru"
+// const serverURL = "http://syncerch.meysner.ru"
+const serverURL = "http://localhost:1244"
 const configFile = "config.json"
 
 type Config struct {

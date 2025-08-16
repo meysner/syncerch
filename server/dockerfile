@@ -27,6 +27,7 @@ RUN useradd -m appuser
 
 # Создаём директории для приложения
 RUN mkdir -p /app/storage/files
+RUN chown -R appuser:appuser /app
 
 # Копируем бинарник из стадии сборки
 COPY --from=builder /app/server /usr/local/bin/server

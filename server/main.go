@@ -15,7 +15,7 @@ import (
 
 const (
 	storagePath = "./storage/files"
-	tokenFile   = "./tokens.txt"
+	tokenFile   = "./storage/tokens.txt"
 )
 
 var (
@@ -44,7 +44,7 @@ func main() {
 		os.MkdirAll(storagePath, 0755)
 
 		// временный файл
-		tmpFile, err := os.CreateTemp("", "upload-*.zip")
+		tmpFile, err := os.CreateTemp(storagePath, "upload-*.zip")
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
