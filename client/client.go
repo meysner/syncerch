@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-const serverURL = "http://localhost:8080" // поменяй на свой адрес сервера
+const serverURL = "http://syncerch.meysner.ru" // поменяй на свой адрес сервера
 
 func main() {
 	reader := bufio.NewReader(os.Stdin)

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,8 +17,17 @@ const (
 	tokenFile   = "./tokens.txt"
 )
 
+var (
+	tokens     = make(map[string]struct{})
+	tokensLock sync.RWMutex
+)
+
 func main() {
+	// создаём storage
 	os.MkdirAll(storagePath, 0755)
+
+	// загружаем токены в память
+	loadTokens()
 
 	r := gin.Default()
 	r.Use(authMiddleware())
@@ -32,12 +42,22 @@ func main() {
 		os.RemoveAll(storagePath)
 		os.MkdirAll(storagePath, 0755)
 
-		tmpPath := "./temp.zip"
-		c.SaveUploadedFile(file, tmpPath)
-
-		err = unzip(tmpPath, storagePath)
-		os.Remove(tmpPath)
+		// временный файл
+		tmpFile, err := os.CreateTemp("", "upload-*.zip")
 		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		tmpPath := tmpFile.Name()
+		tmpFile.Close()
+		defer os.Remove(tmpPath)
+
+		if err := c.SaveUploadedFile(file, tmpPath); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := safeUnzip(tmpPath, storagePath); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -46,14 +66,51 @@ func main() {
 	})
 
 	r.GET("/download", func(c *gin.Context) {
-		tmpPath := "./temp.zip"
-		err := zipFolder(storagePath, tmpPath)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.FileAttachment(tmpPath, "folder.zip")
-		os.Remove(tmpPath)
+		// стримим zip напрямую без промежуточного файла
+		c.Header("Content-Disposition", `attachment; filename="folder.zip"`)
+		c.Header("Content-Type", "application/zip")
+
+		zipWriter := zip.NewWriter(c.Writer)
+		defer zipWriter.Close()
+
+		filepath.Walk(storagePath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+
+			relPath, _ := filepath.Rel(storagePath, path)
+			if info.IsDir() {
+				if relPath == "." {
+					return nil
+				}
+				relPath += "/"
+			}
+
+			header, err := zip.FileInfoHeader(info)
+			if err != nil {
+				return err
+			}
+			header.Name = relPath
+			if !info.IsDir() {
+				header.Method = zip.Deflate
+			}
+
+			writer, err := zipWriter.CreateHeader(header)
+			if err != nil {
+				return err
+			}
+
+			if !info.IsDir() {
+				f, err := os.Open(path)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				_, err = io.Copy(writer, f)
+				return err
+			}
+			return nil
+		})
 	})
 
 	r.Run(":1244")
@@ -70,21 +127,29 @@ func authMiddleware() gin.HandlerFunc {
 	}
 }
 
-func checkToken(token string) bool {
+func loadTokens() {
 	data, err := os.ReadFile(tokenFile)
 	if err != nil {
-		return false
+		return
 	}
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		if strings.TrimSpace(line) == token {
-			return true
+	tokensLock.Lock()
+	defer tokensLock.Unlock()
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			tokens[line] = struct{}{}
 		}
 	}
-	return false
 }
 
-func unzip(src, dest string) error {
+func checkToken(token string) bool {
+	tokensLock.RLock()
+	defer tokensLock.RUnlock()
+	_, ok := tokens[token]
+	return ok
+}
+
+func safeUnzip(src, dest string) error {
 	r, err := zip.OpenReader(src)
 	if err != nil {
 		return err
@@ -93,11 +158,17 @@ func unzip(src, dest string) error {
 
 	for _, f := range r.File {
 		fpath := filepath.Join(dest, f.Name)
+
+		// защита от zip slip
+		if !strings.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
+			return &zip.PathError{Op: "unzip", Path: fpath, Err: os.ErrInvalid}
+		}
+
 		if f.FileInfo().IsDir() {
 			os.MkdirAll(fpath, f.Mode())
 			continue
 		}
-		if err = os.MkdirAll(filepath.Dir(fpath), f.Mode()); err != nil {
+		if err = os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
 			return err
 		}
 		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
@@ -106,6 +177,7 @@ func unzip(src, dest string) error {
 		}
 		rc, err := f.Open()
 		if err != nil {
+			outFile.Close()
 			return err
 		}
 		_, err = io.Copy(outFile, rc)
@@ -115,51 +187,5 @@ func unzip(src, dest string) error {
 			return err
 		}
 	}
-	return nil
-}
-
-func zipFolder(src, dest string) error {
-	zipFile, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	defer zipFile.Close()
-
-	archive := zip.NewWriter(zipFile)
-	defer archive.Close()
-
-	filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		header, err := zip.FileInfoHeader(info)
-		if err != nil {
-			return err
-		}
-		header.Name, _ = filepath.Rel(src, path)
-
-		if info.IsDir() {
-			header.Name += "/"
-		} else {
-			header.Method = zip.Deflate
-		}
-
-		writer, err := archive.CreateHeader(header)
-		if err != nil {
-			return err
-		}
-
-		if !info.IsDir() {
-			file, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-			_, err = io.Copy(writer, file)
-			return err
-		}
-		return nil
-	})
 	return nil
 }
