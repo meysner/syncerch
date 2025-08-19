@@ -1,2 +1,6 @@
 server/storage
+client\config.json
 client/config.json
+client/config.json
+client/syncerch_client.exe
+.gitignore
