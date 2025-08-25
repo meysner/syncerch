@@ -4,3 +4,4 @@ client/config.json
 client/config.json
 client/syncerch_client.exe
 .gitignore
+.DS_Store
